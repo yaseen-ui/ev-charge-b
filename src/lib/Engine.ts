@@ -1,14 +1,27 @@
-const station = require('./Station');
-const loadBalancer = require('./LoadBalancer');
+import station from './Station';
+import loadBalancer from './LoadBalancer';
+import updateEmitter from './Events';
+
+export interface EngineStatus {
+  running: boolean;
+}
+
+export interface EngineStartResult {
+  message: string;
+  running: boolean;
+}
+
+export interface EngineStopResult {
+  message: string;
+  running: boolean;
+}
 
 class Engine {
-  constructor() {
-    this.intervalId = null;
-    this.running = false;
-    this.locked = false;
-  }
+  private intervalId: NodeJS.Timeout | null = null;
+  private running: boolean = false;
+  private locked: boolean = false;
 
-  start() {
+  start(): EngineStartResult {
     if (this.running || this.locked) {
       return { message: 'Engine already running or starting', running: this.running };
     }
@@ -18,10 +31,11 @@ class Engine {
     this.locked = false;
 
     this.intervalId = setInterval(() => this.tick(), 1000);
+    updateEmitter.emitUpdate();
     return { message: 'Engine started', running: true };
   }
 
-  stop() {
+  stop(): EngineStopResult {
     if (this.locked) {
       return { message: 'Engine is locked', running: this.running };
     }
@@ -34,10 +48,11 @@ class Engine {
     this.running = false;
     this.locked = false;
 
+    updateEmitter.emitUpdate();
     return { message: 'Engine stopped', running: false };
   }
 
-  tick() {
+  tick(): void {
     if (!station.isInitialized || this.locked) return;
 
     this.locked = true;
@@ -59,20 +74,22 @@ class Engine {
       }
 
       loadBalancer.rebalancePower();
-
+      updateEmitter.emitUpdate();
     } finally {
       this.locked = false;
     }
   }
 
-  getStatus() {
+  getStatus(): EngineStatus {
     return { running: this.running };
   }
 }
 
-const engine = globalThis.__engine || new Engine();
-if (!globalThis.__engine) {
-  globalThis.__engine = engine;
+// Use a global singleton to persist across hot reloads in Next.js dev mode
+const globalEngine = globalThis as unknown as { __engineInstance: Engine };
+if (!globalEngine.__engineInstance) {
+  globalEngine.__engineInstance = new Engine();
 }
+const engineInstance = globalEngine.__engineInstance;
 
-module.exports = engine;
+export default engineInstance;

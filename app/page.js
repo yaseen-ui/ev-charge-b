@@ -43,40 +43,44 @@ export default function Home() {
   });
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
+  const [isConnected, setIsConnected] = useState(false);
 
   const statusColor = useMemo(() => {
     if (!engineStatus?.running) return 'bg-slate-700 text-slate-200';
     return 'bg-emerald-500/20 text-emerald-200';
   }, [engineStatus]);
 
-  const fetchAll = async () => {
-    try {
-      const [stationRes, vehiclesRes, engineRes] = await Promise.all([
-        fetch('/api/station/status'),
-        fetch('/api/vehicles'),
-        fetch('/api/engine/status')
-      ]);
-
-      if (stationRes.ok) {
-        setStationStatus(await stationRes.json());
-      }
-
-      if (vehiclesRes.ok) {
-        setVehicles(await vehiclesRes.json());
-      }
-
-      if (engineRes.ok) {
-        setEngineStatus(await engineRes.json());
-      }
-    } catch (error) {
-      console.error(error);
-    }
-  };
-
   useEffect(() => {
-    fetchAll();
-    const interval = setInterval(fetchAll, 1000);
-    return () => clearInterval(interval);
+    // Set up SSE
+    const eventSource = new EventSource('/api/updates');
+
+    eventSource.onopen = () => {
+      setIsConnected(true);
+      console.log('SSE connection opened');
+    };
+
+    eventSource.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        setStationStatus(data.station);
+        setVehicles(data.vehicles);
+        setEngineStatus(data.engine);
+      } catch (error) {
+        console.error('Failed to parse SSE data', error);
+      }
+    };
+
+    eventSource.onerror = (error) => {
+      console.error('SSE error', error);
+      setIsConnected(false);
+      eventSource.close();
+      // Optional: implement reconnect logic here if needed
+    };
+
+    return () => {
+      eventSource.close();
+      setIsConnected(false);
+    };
   }, []);
 
   const handleInitStation = async () => {
@@ -90,7 +94,6 @@ export default function Home() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to initialize station');
-      setStationStatus(data.status);
       setMessage(data.message);
     } catch (error) {
       setMessage(error.message);
@@ -105,7 +108,6 @@ export default function Home() {
     try {
       const res = await fetch(`/api/engine/${action}`, { method: 'POST' });
       const data = await res.json();
-      setEngineStatus(data);
       setMessage(data.message || 'Engine updated');
     } catch (error) {
       setMessage(error.message);
@@ -131,7 +133,6 @@ export default function Home() {
       if (!res.ok) throw new Error(data.error || 'Failed to connect vehicle');
       setMessage(data.message);
       setVehicleForm({ id: '', requestedKwh: 0.1, priority: 'normal' });
-      fetchAll();
     } catch (error) {
       setMessage(error.message);
     } finally {
@@ -139,17 +140,23 @@ export default function Home() {
     }
   };
 
-  // Get queue vehicles with wait times for the sidebar
+  // Get queue vehicles for the sidebar
   const queueVehicles = vehicles.filter(v => v.status === 'pending');
 
   return (
     <main className="min-h-screen bg-slate-950 text-slate-100">
       <div className="mx-auto max-w-6xl px-6 py-12">
         <header className="flex flex-col gap-3">
-          <p className="text-sm uppercase tracking-[0.3em] text-slate-400">EV Charging Station</p>
+          <div className="flex items-center justify-between">
+            <p className="text-sm uppercase tracking-[0.3em] text-slate-400">EV Charging Station</p>
+            <div className={`flex items-center gap-2 text-xs ${isConnected ? 'text-emerald-400' : 'text-rose-400'}`}>
+              <span className={`h-2 w-2 rounded-full ${isConnected ? 'bg-emerald-400 animate-pulse' : 'bg-rose-400'}`}></span>
+              {isConnected ? 'Live Updates Active' : 'Disconnected'}
+            </div>
+          </div>
           <h1 className="text-4xl font-semibold">Load Balancer Control Center</h1>
           <p className="max-w-2xl text-slate-300">
-            Configure the station, connect vehicles, and monitor live charging allocation.
+            Configure the station, connect vehicles, and monitor live charging allocation in real-time.
           </p>
         </header>
 
@@ -247,9 +254,9 @@ export default function Home() {
             </div>
 
             <div className="mt-6 rounded-xl border border-slate-800 bg-slate-950/80 p-4">
-              <p className="text-xs uppercase tracking-[0.3em] text-slate-500">Engine Status</p>
+              <p className="text-xs uppercase tracking-[0.3em] text-slate-500">Real-time Updates</p>
               <p className="mt-2 text-sm text-slate-300">
-                The scheduler runs every second and updates charged kWh for each active plug.
+                Connected via Server-Sent Events. Updates are pushed instantly when the engine ticks or state changes.
               </p>
             </div>
           </div>
@@ -365,12 +372,6 @@ export default function Home() {
               <h2 className="text-xl font-semibold">Vehicles</h2>
               <p className="text-sm text-slate-400">Charging progress, time remaining, and queue wait times.</p>
             </div>
-            <button
-              onClick={fetchAll}
-              className="rounded-lg border border-slate-700 px-3 py-1 text-xs text-slate-300 hover:bg-slate-800"
-            >
-              Refresh
-            </button>
           </div>
 
           <div className="mt-6 overflow-hidden rounded-xl border border-slate-800">

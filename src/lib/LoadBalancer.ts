@@ -1,7 +1,9 @@
-const station = require('./Station');
+import station from './Station';
+import updateEmitter from './Events';
+import type { VehicleInput, Vehicle } from '../models/Station';
 
 class LoadBalancer {
-  processQueue() {
+  processQueue(): void {
     if (!station.isInitialized) return;
 
     while (station.activePlugs.length < station.plugCount && station.queue.length > 0) {
@@ -10,16 +12,17 @@ class LoadBalancer {
     }
 
     this.rebalancePower();
+    updateEmitter.emitUpdate();
   }
 
-  rebalancePower() {
+  rebalancePower(): void {
     if (station.activePlugs.length === 0) return;
 
     const chargingVehicles = station.getChargingVehicles();
     if (chargingVehicles.length === 0) return;
 
-    const priorityOrder = ['emergency', 'vip', 'normal'];
-    const groups = {
+    const priorityOrder = ['emergency', 'vip', 'normal'] as const;
+    const groups: Record<typeof priorityOrder[number], Vehicle[]> = {
       emergency: [],
       vip: [],
       normal: []
@@ -30,7 +33,7 @@ class LoadBalancer {
     });
 
     let remainingPower = station.totalPowerKw;
-    const allocations = {};
+    const allocations: Record<string, number> = {};
 
     for (const priority of priorityOrder) {
       const vehicles = groups[priority];
@@ -53,23 +56,26 @@ class LoadBalancer {
         station.vehicles[plug.vehicleId].allocatedKw = plug.allocatedKw;
       }
     });
+    updateEmitter.emitUpdate();
   }
 
-  connectVehicle(vehicle) {
+  connectVehicle(vehicle: VehicleInput): Vehicle {
     station.addVehicle(vehicle);
     this.processQueue();
     return station.vehicles[vehicle.id];
   }
 
-  handleVehicleComplete(vehicleId) {
+  handleVehicleComplete(vehicleId: string): void {
     station.releasePlug(vehicleId);
     this.processQueue();
   }
 }
 
-const loadBalancer = globalThis.__loadBalancer || new LoadBalancer();
-if (!globalThis.__loadBalancer) {
-  globalThis.__loadBalancer = loadBalancer;
+// Use a global singleton to persist across hot reloads in Next.js dev mode
+const globalLB = globalThis as unknown as { __loadBalancerInstance: LoadBalancer };
+if (!globalLB.__loadBalancerInstance) {
+  globalLB.__loadBalancerInstance = new LoadBalancer();
 }
+const loadBalancerInstance = globalLB.__loadBalancerInstance;
 
-module.exports = loadBalancer;
+export default loadBalancerInstance;
