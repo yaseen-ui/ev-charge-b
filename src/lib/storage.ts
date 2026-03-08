@@ -1,8 +1,9 @@
 import * as fs from 'fs';
 import * as path from 'path';
+import { Store } from '../models/Store';
 
 // Default data directory relative to project root
-const DATA_DIR = path.join(__dirname, '../../data');
+const DATA_DIR = path.join(process.cwd(), 'data');
 const DEFAULT_FILE = 'station-data.json';
 
 export interface PersistedData {
@@ -29,6 +30,7 @@ export interface PersistedData {
     connectedAt: string;
   }>;
   isInitialized: boolean;
+  stores?: Store[];
 }
 
 /**

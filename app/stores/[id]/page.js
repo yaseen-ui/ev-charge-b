@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
+import { useParams } from 'next/navigation';
 
 const PRIORITY_OPTIONS = [
   { value: 'emergency', label: 'Emergency' },
@@ -32,7 +33,15 @@ function formatTime(seconds) {
   return parts.join(' ');
 }
 
-export default function Home() {
+export default function StorePage() {
+  const params = useParams();
+  const storeId = params.id;
+  
+  const [store, setStore] = useState(null);
+  const [storeLoading, setStoreLoading] = useState(true);
+  const [storeError, setStoreError] = useState('');
+
+  // Station state
   const [stationConfig, setStationConfig] = useState(initialConfig);
   const [stationStatus, setStationStatus] = useState(null);
   const [vehicles, setVehicles] = useState([]);
@@ -51,13 +60,19 @@ export default function Home() {
     return 'bg-emerald-500/20 text-emerald-200';
   }, [engineStatus]);
 
+  // Fetch store details
   useEffect(() => {
-    // Set up SSE
+    if (storeId) {
+      fetchStore();
+    }
+  }, [storeId]);
+
+  // Set up SSE for real-time updates
+  useEffect(() => {
     const eventSource = new EventSource('/api/updates');
 
     eventSource.onopen = () => {
       setIsConnected(true);
-      console.log('SSE connection opened');
     };
 
     eventSource.onmessage = (event) => {
@@ -71,11 +86,9 @@ export default function Home() {
       }
     };
 
-    eventSource.onerror = (error) => {
-      console.error('SSE error', error);
+    eventSource.onerror = () => {
       setIsConnected(false);
       eventSource.close();
-      // Optional: implement reconnect logic here if needed
     };
 
     return () => {
@@ -83,6 +96,24 @@ export default function Home() {
       setIsConnected(false);
     };
   }, []);
+
+  const fetchStore = async () => {
+    setStoreLoading(true);
+    try {
+      const res = await fetch(`/api/stores/${storeId}`);
+      const data = await res.json();
+      
+      if (!res.ok) {
+        throw new Error(data.error || 'Failed to fetch store');
+      }
+      
+      setStore(data.store);
+    } catch (err) {
+      setStoreError(err.message);
+    } finally {
+      setStoreLoading(false);
+    }
+  };
 
   const handleInitStation = async () => {
     setLoading(true);
@@ -144,28 +175,62 @@ export default function Home() {
   // Get queue vehicles for the sidebar
   const queueVehicles = vehicles.filter(v => v.status === 'pending');
 
+  if (storeLoading) {
+    return (
+      <main className="min-h-screen bg-slate-950 text-slate-100">
+        <div className="mx-auto max-w-6xl px-6 py-12">
+          <div className="flex items-center justify-center py-20">
+            <div className="text-slate-400">Loading store...</div>
+          </div>
+        </div>
+      </main>
+    );
+  }
+
+  if (storeError || !store) {
+    return (
+      <main className="min-h-screen bg-slate-950 text-slate-100">
+        <div className="mx-auto max-w-6xl px-6 py-12">
+          <div className="rounded-2xl border border-rose-800 bg-rose-900/20 p-8 text-center">
+            <h2 className="text-xl font-semibold text-rose-200">Error</h2>
+            <p className="mt-2 text-rose-300">{storeError || 'Store not found'}</p>
+            <Link 
+              href="/stores" 
+              className="mt-4 inline-block rounded-lg border border-slate-600 px-4 py-2 text-sm text-slate-300 hover:bg-slate-800"
+            >
+              ← Back to Stores
+            </Link>
+          </div>
+        </div>
+      </main>
+    );
+  }
+
   return (
     <main className="min-h-screen bg-slate-950 text-slate-100">
       <div className="mx-auto max-w-6xl px-6 py-12">
+        {/* Breadcrumb */}
+        <div className="mb-6">
+          <Link 
+            href="/stores" 
+            className="text-sm text-slate-400 hover:text-emerald-400 transition"
+          >
+            ← Back to Stores
+          </Link>
+        </div>
+
+        {/* Store Header */}
         <header className="flex flex-col gap-3">
           <div className="flex items-center justify-between">
-            <p className="text-sm uppercase tracking-[0.3em] text-slate-400">EV Charging Station</p>
+            <p className="text-sm uppercase tracking-[0.3em] text-slate-400">{store.name}</p>
             <div className={`flex items-center gap-2 text-xs ${isConnected ? 'text-emerald-400' : 'text-rose-400'}`}>
               <span className={`h-2 w-2 rounded-full ${isConnected ? 'bg-emerald-400 animate-pulse' : 'bg-rose-400'}`}></span>
               {isConnected ? 'Live Updates Active' : 'Disconnected'}
             </div>
           </div>
-          <div className="flex items-center justify-between">
-            <h1 className="text-4xl font-semibold">Load Balancer Control Center</h1>
-            <Link 
-              href="/stores"
-              className="rounded-lg border border-slate-600 px-4 py-2 text-sm text-slate-300 hover:bg-slate-800 transition"
-            >
-              Manage Stores
-            </Link>
-          </div>
+          <h1 className="text-4xl font-semibold">Load Balancer Control Center</h1>
           <p className="max-w-2xl text-slate-300">
-            Configure the station, connect vehicles, and monitor live charging allocation in real-time.
+            {store.address}{store.description && ` • ${store.description}`}
           </p>
         </header>
 
